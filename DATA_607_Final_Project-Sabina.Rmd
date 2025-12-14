@@ -1,0 +1,202 @@
+---
+title: "Air Quality and Asthma Emergency Department Visits in New York City"
+author: "Sabina Baraili"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+fontsize: 11pt
+---
+```{css, echo=FALSE}
+#TOC ul li {
+  text-indent: 0 !important;
+  margin-left: 0 !important;
+}
+#TOC ul li a {
+  white-space: normal !important;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(janitor)
+library(broom)
+library(scales)
+```
+
+# 1. Motivation and Research Question
+
+Asthma is a major public health concern in New York City, with emergency department (ED) visit rates varying considerably across neighborhoods. Environmental exposure, particularly to fine particulate matter (PM2.5), has been linked in prior research to adverse respiratory outcomes. However, exposure to air pollution is not evenly distributed across communities.
+
+This project examines whether neighborhoods with higher PM2.5 concentrations also experience higher asthma-related emergency department visit rates. Understanding this relationship can help identify environmental health disparities and inform public health interventions.
+
+**Research Question:**  
+Is neighborhood-level PM2.5 concentration associated with asthma emergency department visit rates in New York City?
+
+# 2. Data Sources
+
+Two official datasets from the NYC Department of Health and Mental Hygiene Environmental Health Data Portal are used:
+
+1. **Asthma Emergency Department Visits (Adults)**  
+   Age-adjusted asthma ED visit rates per 10,000 adults by community district.
+
+2. **Fine Particulate Matter (PM2.5)**  
+   Annual mean PM2.5 concentrations (µg/m³) by community district.
+
+```{r load-data}
+asthma_raw <- read_csv(
+  "NYC EH Data Portal - Asthma emergency department visits (adults) (full table).csv"
+) |> clean_names()
+
+pm25_raw <- read_csv(
+  "NYC EH Data Portal - Fine particles (PM 2.5) (full table).csv"
+) |> clean_names()
+```
+
+# 3. Data Cleaning and Transformation
+
+```{r clean-transform}
+asthma_clean <- asthma_raw |>
+  filter(geo_type == "CD") |>
+  select(
+    time_period,
+    geography,
+    asthma_rate = age_adjusted_rate_per_10_000
+  ) |>
+  mutate(asthma_rate = as.numeric(asthma_rate))
+
+pm25_clean <- pm25_raw |>
+  filter(geo_type == "CD") |>
+  select(
+    time_period,
+    geography,
+    pm25 = annual_mean_mcg_m3
+  ) |>
+  mutate(pm25 = as.numeric(pm25))
+
+nyc_health <- inner_join(
+  asthma_clean,
+  pm25_clean,
+  by = c("time_period", "geography")
+) |>
+  drop_na()
+```
+
+# 4. Exploratory Data Analysis
+
+## 4.1 Distribution of Asthma ED Visit Rates
+
+```{r asthma-dist}
+ggplot(nyc_health, aes(x = asthma_rate)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 25,
+    fill = "#4C78A8",
+    color = "white",
+    alpha = 0.9
+  ) +
+  geom_density(color = "#1F3552", linewidth = 1) +
+  labs(
+    title = "Asthma Emergency Department Visit Rates Across NYC",
+    subtitle = "Age-adjusted ED visits per 10,000 adults by community district",
+    x = "Asthma ED Visits per 10,000 Adults",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## 4.2 Distribution of PM2.5 Concentrations
+
+```{r pm25-dist}
+ggplot(nyc_health, aes(x = pm25)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 25,
+    fill = "#F58518",
+    color = "white",
+    alpha = 0.9
+  ) +
+  geom_density(color = "#7A3E00", linewidth = 1) +
+  labs(
+    title = "Distribution of PM2.5 Concentrations Across NYC",
+    subtitle = "Annual mean fine particulate matter by community district",
+    x = "PM2.5 Concentration (µg/m³)",
+    y = "Density"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+# 5. Statistical Analysis
+
+## 5.1 Correlation Analysis
+
+```{r correlation}
+cor.test(nyc_health$pm25, nyc_health$asthma_rate)
+```
+
+## 5.2 Linear Regression
+
+```{r regression}
+model <- lm(asthma_rate ~ pm25, data = nyc_health)
+summary(model)
+```
+
+```{r tidy-model}
+tidy(model)
+```
+
+## 5.3 Regression Visualization
+
+```{r regression-plot}
+ggplot(nyc_health, aes(x = pm25, y = asthma_rate)) +
+  geom_point(
+    color = "#4C78A8",
+    alpha = 0.7,
+    size = 2
+  ) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    color = "#E45756",
+    fill = "#E45756",
+    alpha = 0.2
+  ) +
+  labs(
+    title = "Association Between PM2.5 Exposure and Asthma ED Visit Rates",
+    subtitle = "Each point represents a NYC community district",
+    x = "Annual Mean PM2.5 Concentration (µg/m³)",
+    y = "Asthma ED Visits per 10,000 Adults"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+# 6. Advanced Feature: Neighborhood Risk Ranking
+
+```{r ranking}
+nyc_health |>
+  mutate(
+    pm25_rank = rank(-pm25),
+    asthma_rank = rank(-asthma_rate),
+    combined_risk = pm25_rank + asthma_rank
+  ) |>
+  arrange(combined_risk) |>
+  slice(1:10)
+```
+
+# 7. Challenges Encountered
+
+Several challenges were encountered during the analysis. Rate variables were initially imported as character values, requiring explicit conversion to numeric format before visualization and modeling. Additionally, aligning environmental and health datasets required careful filtering to consistent geographic units and time periods.
+
+# 8. Conclusions
+
+The analysis indicates a positive association between PM2.5 concentrations and asthma emergency department visit rates across New York City community districts. While causality cannot be inferred from this observational analysis, the results are consistent with prior environmental health research and highlight potential environmental health disparities.
+
+# 9. Reproducibility
+
+All data acquisition, transformation, analysis, and visualization steps are contained within this RMarkdown document. With the accompanying datasets, the analysis can be fully reproduced by knitting this file.
